@@ -122,7 +122,7 @@ function getNextId(db, collectionName, fieldName, callback) {
                     callback(err);
                 }
             } else {
-                callback(null, result.seq);
+                callback(null, result.seq || (result.value && result.value.seq));
             }
         }
     );
