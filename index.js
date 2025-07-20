@@ -5,9 +5,9 @@
 
 var settings = {};
 var defaultSettings = {
-  collection: "counters",
-  field: "_id",
-  step: 1,
+    collection: "counters",
+    field: "_id",
+    step: 1
 };
 
 /**
@@ -19,18 +19,18 @@ var defaultSettings = {
  * @param {Function} callback callback(err, number)
  */
 exports.getNextSequence = function (db, collectionName, fieldName, callback) {
-  if (typeof fieldName == "function") {
-    callback = fieldName;
-    fieldName = null;
-  }
+    if (typeof fieldName == "function") {
+        callback = fieldName;
+        fieldName = null;
+    }
 
-  if (db._state == "connecting") {
-    db.on("open", function (err, db) {
-      getNextId(db, collectionName, fieldName, callback);
-    });
-  } else {
-    getNextId(db, collectionName, fieldName, callback);
-  }
+    if (db._state == "connecting") {
+        db.on("open", function (err, db) {
+            getNextId(db, collectionName, fieldName, callback);
+        });
+    } else {
+        getNextId(db, collectionName, fieldName, callback);
+    }
 };
 
 /**
@@ -50,36 +50,31 @@ exports.getNextSequence = function (db, collectionName, fieldName, callback) {
  * @param {Object} [options]
  */
 exports.mongoosePlugin = function (schema, options) {
-  options = options || {};
-  var fieldName = options.field || defaultSettings.field;
+    options = options || {};
+    var fieldName = options.field || defaultSettings.field;
 
-  if (schema.options._id) {
-    var schemaField = {};
-    schemaField[fieldName] = { type: Number, unique: true, required: true };
-    schema.add(schemaField);
-  }
-
-  schema.pre("save", function (next) {
-    var doc = this;
-
-    if (doc.isNew && doc.collection) {
-      if (!settings[doc.collection.name]) {
-        settings[doc.collection.name] = options;
-      }
-
-      exports.getNextSequence(
-        doc.db.db,
-        doc.collection.name,
-        fieldName,
-        function (err, result) {
-          doc[fieldName] = result;
-          next(err);
-        }
-      );
-    } else {
-      next();
+    if (schema.options._id) {
+        var schemaField = {};
+        schemaField[fieldName] = {type: Number, unique: true, required: true};
+        schema.add(schemaField);
     }
-  });
+
+    schema.pre('save', function (next) {
+        var doc = this;
+
+        if (doc.isNew && doc.collection) {
+            if (!settings[doc.collection.name]) {
+                settings[doc.collection.name] = options;
+            }
+
+            exports.getNextSequence(doc.db.db, doc.collection.name, fieldName, function (err, result) {
+                doc[fieldName] = result;
+                next(err);
+            });
+        } else {
+            next();
+        }
+    });
 };
 
 /**
@@ -90,55 +85,35 @@ exports.mongoosePlugin = function (schema, options) {
  * @param {Object} options
  */
 exports.setDefaults = function (options) {
-  for (var key in options) {
-    if (options.hasOwnProperty(key)) {
-      defaultSettings[key] = options[key];
+    for (var key in options) {
+        if (options.hasOwnProperty(key)) {
+            defaultSettings[key] = options[key];
+        }
     }
-  }
 };
 
 /* Shared increment method */
-function _runIncrementMethod(
-  methodName,
-  collection,
-  query,
-  update,
-  options,
-  callback
-) {
+function _runIncrementMethod(methodName, collection, query, update, options, callback) {
   var method = collection[methodName];
   if (!method) {
-    return callback(
-      new Error(`${methodName} is not supported by the collection.`)
-    );
+    return callback(new Error(`${methodName} is not supported by the collection.`));
   }
-  var args =
-    methodName === "findAndModify"
-      ? [query, null, update, options]
-      : [query, update, options];
-  method.apply(collection, [
-    ...args,
-    function (err, result) {
-      if (err) {
-        if (err.code === 11000) {
-          process.nextTick(() =>
-            _runIncrementMethod(
-              methodName,
-              collection,
-              query,
-              update,
-              options,
-              callback
-            )
-          );
-        } else {
-          callback(err);
-        }
+  var args = methodName === "findAndModify"
+    ? [query, null, update, options]
+    : [query, update, options];
+  method.apply(collection, [...args, function (err, result) {
+    if (err) {
+      if (err.code === 11000) {
+        process.nextTick(() =>
+          _runIncrementMethod(methodName, collection, query, update, options, callback)
+        );
       } else {
-        callback(null, result.seq || (result.value && result.value.seq));
+        callback(err);
       }
-    },
-  ]);
+    } else {
+      callback(null, result.seq || (result.value && result.value.seq));
+    }
+  }]);
 }
 
 /**
@@ -149,49 +124,32 @@ function _runIncrementMethod(
  * @param {Function} callback
  */
 function getNextId(db, collectionName, fieldName, callback) {
-  if (typeof fieldName == "function") {
-    callback = fieldName;
-    fieldName = null;
-  }
+    if (typeof fieldName == "function") {
+        callback = fieldName;
+        fieldName = null;
+    }
 
-  fieldName = fieldName || getOption(collectionName, "field");
-  var collection = db.collection(defaultSettings.collection);
-  var step = getOption(collectionName, "step");
-
-  var query = { _id: collectionName, field: fieldName };
-  var update = { $inc: { seq: step } };
-  var useFindAndModify = typeof collection.findAndModify === "function";
-  var options = {
-    upsert: true,
-    new: true,
-  };
-  var incrementMethods = {
-    v1: () =>
-      _runIncrementMethod(
-        "findAndModify",
-        collection,
-        query,
-        update,
-        options,
-        callback
-      ),
-    v2: () =>
-      _runIncrementMethod(
-        "findOneAndUpdate",
-        collection,
-        query,
-        update,
-        options,
-        callback
-      ),
-  };
-  var methodVersion = useFindAndModify ? "v1" : "v2";
-  incrementMethods[methodVersion]();
+    fieldName = fieldName || getOption(collectionName, "field");
+    var collection = db.collection(defaultSettings.collection);
+    var step = getOption(collectionName, "step");
+  
+    var query = { _id: collectionName, field: fieldName };
+    var update = { $inc: { seq: step } };
+    var useFindAndModify = typeof collection.findAndModify === "function";
+    var options = {
+      upsert: true,
+      new: true
+    };
+    var incrementMethods = {
+      v1: () => _runIncrementMethod("findAndModify", collection, query, update, options, callback),
+      v2: () => _runIncrementMethod("findOneAndUpdate", collection, query, update, options, callback),
+    };
+    var methodVersion = useFindAndModify ? "v1" : "v2";
+    incrementMethods[methodVersion]();
 }
 
 function getOption(collectionName, optionName) {
-  return settings[collectionName] &&
-    settings[collectionName][optionName] !== undefined
-    ? settings[collectionName][optionName]
-    : defaultSettings[optionName];
+    return settings[collectionName] && settings[collectionName][optionName] !== undefined ?
+        settings[collectionName][optionName] :
+        defaultSettings[optionName];
 }
