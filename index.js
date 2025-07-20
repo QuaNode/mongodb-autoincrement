@@ -92,6 +92,30 @@ exports.setDefaults = function (options) {
     }
 };
 
+/* Shared increment method */
+function _runIncrementMethod(methodName, collection, query, update, options, callback) {
+  var method = collection[methodName];
+  if (!method) {
+    return callback(new Error(`${methodName} is not supported by the collection.`));
+  }
+  var args = methodName === "findAndModify"
+    ? [query, null, update, options]
+    : [query, update, options];
+  method.apply(collection, [...args, function (err, result) {
+    if (err) {
+      if (err.code === 11000) {
+        process.nextTick(() =>
+          _runIncrementMethod(methodName, collection, query, update, options, callback)
+        );
+      } else {
+        callback(err);
+      }
+    } else {
+      callback(null, result.seq || (result.value && result.value.seq));
+    }
+  }]);
+}
+
 /**
  * Get next auto increment index for the given collection
  * @param {MongodbNativeDriver} db
@@ -108,24 +132,20 @@ function getNextId(db, collectionName, fieldName, callback) {
     fieldName = fieldName || getOption(collectionName, "field");
     var collection = db.collection(defaultSettings.collection);
     var step = getOption(collectionName, "step");
-
-    collection.findAndModify(
-        {_id: collectionName, field: fieldName},
-        null,
-        {$inc: {seq: step}},
-        {upsert: true, new: true},
-        function (err, result) {
-            if (err) {
-                if (err.code == 11000) {
-                    process.nextTick(getNextId.bind(null, db, collectionName, fieldName, callback));
-                } else {
-                    callback(err);
-                }
-            } else {
-                callback(null, result.seq || (result.value && result.value.seq));
-            }
-        }
-    );
+  
+    var query = { _id: collectionName, field: fieldName };
+    var update = { $inc: { seq: step } };
+    var useFindAndModify = typeof collection.findAndModify === "function";
+    var options = {
+      upsert: true,
+      new: true
+    };
+    var incrementMethods = {
+      v1: () => _runIncrementMethod("findAndModify", collection, query, update, options, callback),
+      v2: () => _runIncrementMethod("findOneAndUpdate", collection, query, update, options, callback),
+    };
+    var methodVersion = useFindAndModify ? "v1" : "v2";
+    incrementMethods[methodVersion]();
 }
 
 function getOption(collectionName, optionName) {
@@ -133,4 +153,3 @@ function getOption(collectionName, optionName) {
         settings[collectionName][optionName] :
         defaultSettings[optionName];
 }
-
