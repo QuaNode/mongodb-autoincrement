@@ -138,7 +138,8 @@ function getNextId(db, collectionName, fieldName, callback) {
     var useFindAndModify = typeof collection.findAndModify === "function";
     var options = {
       upsert: true,
-      new: true
+      new: true,
+      returnDocument: "after"
     };
     var incrementMethods = {
       v1: () => _runIncrementMethod("findAndModify", collection, query, update, options, callback),
